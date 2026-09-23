@@ -1,0 +1,17 @@
+[project]
+name = "cellforge"
+version = "0.1.0"
+description = "Cellular-substrate ML training. The cell matrix outlives every model architecture."
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Casey / SuperInstance", email = "superinstance@anthropic.com" }]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[project.scripts]
+cellforge = "cellforge.__main__:main"
