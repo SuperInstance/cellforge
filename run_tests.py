@@ -30,6 +30,10 @@ def main():
         ("witness_cell_retention_constraint", t.test_witness_cell_retention_constraint),
         ("killer_pause_100_workers", t.test_killer_pause_100_workers),
         ("status_returns_useful_dict", t.test_status_returns_useful_dict),
+        # v0.1.1 — write lock safety interlock
+        ("cannot_modify_canon_while_playing", t.test_cannot_modify_canon_while_playing),
+        ("force_write_bypasses_lock", t.test_force_write_bypasses_lock),
+        ("witness_log_writes_always_allowed", t.test_witness_log_writes_always_allowed),
     ]
     passed = 0
     failed = 0

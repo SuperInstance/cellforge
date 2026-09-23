@@ -269,3 +269,60 @@ def test_status_returns_useful_dict():
     assert s["current_tick"] == 3
     assert s["workers"] == 1
     assert s["last_pause"] is None
+
+
+def test_cannot_modify_canon_while_playing():
+    """v0.1.1: Write-lock safety interlock. Cannot add cells while PLAYING."""
+    from cellforge import Workbook, Cell, CellKind, Zone, Retention
+    d = Dispatcher()
+    wb = Workbook(name="locked-test")
+    wb.bind_dispatcher(d)
+    # IDLE — additions allowed
+    wb.add_cell(Cell(id="c1", kind=CellKind.WEIGHT, zone=Zone.A,
+                     retention=Retention.FULL_LEDGER))
+    assert "c1" in wb.cells
+    # Start playing
+    d.transition_to(Mode.PLAYING)
+    # Now additions should fail
+    try:
+        wb.add_cell(Cell(id="c2", kind=CellKind.WEIGHT, zone=Zone.A,
+                         retention=Retention.FULL_LEDGER))
+        assert False, "Should have raised PermissionError"
+    except PermissionError:
+        pass
+    # Pause — additions allowed again
+    d.pause(force=True)
+    wb.add_cell(Cell(id="c3", kind=CellKind.WEIGHT, zone=Zone.A,
+                     retention=Retention.FULL_LEDGER))
+    assert "c3" in wb.cells
+
+
+def test_force_write_bypasses_lock():
+    """v0.1.1: force=True allows writes even while PLAYING (admin escape hatch)."""
+    from cellforge import Workbook, Cell, CellKind, Zone, Retention
+    d = Dispatcher()
+    wb = Workbook(name="force-test")
+    wb.bind_dispatcher(d)
+    d.transition_to(Mode.PLAYING)
+    d.tick(5)
+    # Direct call with force=True bypasses lock
+    wb.add_cell(
+        Cell(id="emergency_cell", kind=CellKind.WEIGHT, zone=Zone.A,
+             retention=Retention.FULL_LEDGER),
+        force=True,
+    )
+    assert "emergency_cell" in wb.cells
+
+
+def test_witness_log_writes_always_allowed():
+    """v0.1.1: Witness log writes are NOT canon-modification, always allowed."""
+    wb = Workbook(name="witness-allowed")
+    d = Dispatcher()
+    wb.bind_dispatcher(d)
+    d.transition_to(Mode.PLAYING)
+    d.tick(10)
+    # Witness writes should never be blocked
+    for i in range(5):
+        ev = wb.record_witness("A", {"event": i, "tick": i})
+        assert ev.content_hash
+    assert len(wb.witness_log) == 5

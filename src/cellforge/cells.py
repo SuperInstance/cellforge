@@ -102,7 +102,12 @@ class ForkVersionVector:
 
 @dataclass
 class Workbook:
-    """The grid. The town. The cell matrix."""
+    """The grid. The town. The cell matrix.
+
+    v0.1.1: write-lock when dispatcher is PLAYING.
+    Modifying the canon (cells, forks) requires PAUSE.
+    Witness log writes are ALWAYS allowed (they ARE the canon).
+    """
     name: str
     cells: Dict[str, Cell] = field(default_factory=dict)
     forks: Dict[str, ForkVersionVector] = field(default_factory=dict)
@@ -111,8 +116,28 @@ class Workbook:
     witness_log: List[WitnessEvent] = field(default_factory=list)
     # Vector clock per zone
     vector_clock: Dict[str, int] = field(default_factory=lambda: {"A": 0, "B": 0, "C": 0, "master": 0})
+    # Optional reference to a Dispatcher for write-lock enforcement
+    _dispatcher: Optional[Any] = field(default=None, init=False, repr=False)
 
-    def add_cell(self, cell: Cell) -> None:
+    def bind_dispatcher(self, dispatcher) -> None:
+        """Bind a dispatcher so add_cell enforces write-lock when PLAYING."""
+        self._dispatcher = dispatcher
+
+    def _check_write_lock(self, force: bool) -> None:
+        """Internal: enforce write-lock unless force=True or not bound to dispatcher."""
+        if force or self._dispatcher is None:
+            return
+        mode = getattr(self._dispatcher, "mode", None)
+        from .dispatcher import Mode
+        if mode == Mode.PLAYING:
+            raise PermissionError(
+                "Cannot modify canon while dispatcher is PLAYING. "
+                "Pause first, or pass force=True to bypass."
+            )
+
+    def add_cell(self, cell: Cell, force: bool = False) -> None:
+        """Add a cell. Write-lock enforces (force=True bypass)."""
+        self._check_write_lock(force)
         if cell.id in self.cells:
             raise ValueError(f"Cell {cell.id} already exists")
         self.cells[cell.id] = cell
@@ -120,20 +145,21 @@ class Workbook:
     def get_cell(self, cell_id: str) -> Cell:
         return self.cells[cell_id]
 
-    def add_fork(self, fv: ForkVersionVector) -> None:
+    def add_fork(self, fv: ForkVersionVector, force: bool = False) -> None:
+        """Add a fork. Write-lock enforces."""
+        self._check_write_lock(force)
         self.forks[fv.fork_id] = fv
-        # Update siblings' lists
         if fv.parent_fork:
             parent = self.forks.get(fv.parent_fork)
             if parent and fv.fork_id not in parent.sibling_forks:
                 parent.sibling_forks.append(fv.fork_id)
 
     def record_witness(self, zone_id: str, payload: Any) -> WitnessEvent:
-        """Append a witness event with vector-clock consistency."""
+        """Append a witness event. ALWAYS allowed (witness IS the canon)."""
         self.vector_clock[zone_id] = self.vector_clock.get(zone_id, 0) + 1
-        parent_hashes = [e.content_hash for e in self.witness_log[-3:]]  # last 3 for resilience
+        parent_hashes = [e.content_hash for e in self.witness_log[-3:]]
         ev = WitnessEvent.make(
-            tick=self.vector_clock["master"],  # global tick = max of all zones
+            tick=self.vector_clock["master"],
             zone_id=zone_id,
             vector_clock=dict(self.vector_clock),
             parent_hashes=parent_hashes,
@@ -145,11 +171,9 @@ class Workbook:
     def validate(self) -> List[str]:
         """Validate the workbook. Returns list of issues (empty if valid)."""
         issues = []
-        # WITNESS_CELL retention check
         for c in self.cells.values():
             if c.kind == CellKind.WITNESS and c.retention != Retention.FULL_LEDGER:
                 issues.append(f"WITNESS_CELL {c.id} must have full_ledger retention")
-        # Vector clock consistency
         for ev in self.witness_log:
             for z in ev.vector_clock:
                 if ev.vector_clock[z] > self.vector_clock.get(z, 0) + 1:

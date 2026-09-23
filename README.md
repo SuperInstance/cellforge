@@ -6,7 +6,7 @@
 
 A Quilt-native training substrate where the cell matrix is the **permanent destination**, and the math engines (PyTorch / JAX / CUDA / custom) are disposable, hot-swappable utility workers.
 
-**v0.1.0** — The Killer Pause
+**v0.1.1** — The Killer Pause + Write Lock
 
 This release ships the minimum that proves the inversion AND a memorable demo:
 
@@ -15,8 +15,13 @@ This release ships the minimum that proves the inversion AND a memorable demo:
 - A dispatcher that **IS** a cell (writes propagate)
 - Pause sub-state machine (REQUESTED → ACKNOWLEDGED → FULLY_PAUSED)
 - **The killer test**: 100 workers, pause on the same tick, in <2ms, with 0 drift
+- **Write-lock safety interlock** (v0.1.1): cannot modify canon while PLAYING
+- **Force escape hatch**: `add_cell(force=True)` bypasses lock for admin
+- **Witness log writes always allowed** (witness IS canon)
 - Vector-clock-ordered witness chain
 - CLI: `init`, `status`, `test-killer`
+
+18/18 tests pass.
 
 ---
 
