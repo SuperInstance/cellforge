@@ -43,6 +43,13 @@ def main():
         ("rewind_blocks_writes_to_canon", t.test_rewind_blocks_writes_to_canon),
         ("replay_cell_integrity", t.test_replay_cell_integrity),
         ("pause_rewind_change_resume_diverges", t.test_pause_rewind_change_resume_diverges),
+        # v0.3.0 — PREDICTING + PredictionCell + JEPA stub
+        ("predicting_creates_fork_id", t.test_predicting_creates_fork_id),
+        ("predicting_exits_to_paused", t.test_predicting_exits_to_paused),
+        ("prediction_cell_normalized", t.test_prediction_cell_normalized),
+        ("prediction_cell_entropy", t.test_prediction_cell_entropy),
+        ("jepa_predictor_basic", t.test_jepa_predictor_basic),
+        ("jev_verifier_basic", t.test_jev_verifier_basic),
     ]
     passed = 0
     failed = 0

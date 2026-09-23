@@ -25,6 +25,7 @@ class Mode(str, enum.Enum):
     PLAYING = "PLAYING"
     PAUSED = "PAUSED"
     REWINDING = "REWINDING"  # v0.2: read-only backward traversal
+    PREDICTING = "PREDICTING"  # v0.3: fork ledger, write to PREDICTION_CELLs
 
 
 class PauseSubState(str, enum.Enum):
@@ -84,6 +85,9 @@ class Dispatcher:
         self.rewinding: bool = False
         # v0.2: tick_window for learning (Qwen-Max-Thinking Theme 23)
         self.tick_window: int = 1
+        # v0.3: prediction tracking
+        self.active_fork_id: Optional[str] = None
+        self.active_scenarios: Optional[Dict] = None
 
     def register_worker(self, worker_id: str, zone_id: str = "A") -> WorkerHandle:
         """Register a worker with the dispatcher."""
@@ -228,6 +232,34 @@ class Dispatcher:
         self.rewind_target_tick = target_tick
         self.mode = Mode.REWINDING
         self.rewinding = True
+
+    def enter_predicting(self, scenarios: Optional[Dict] = None) -> str:
+        """v0.3: Enter PREDICTING mode.
+
+        Writes go to PREDICTION_CELLs instead of canon. The active scenario
+        is forked from the current canon state.
+
+        Returns the fork_id (used to label the resulting PREDICTION_CELLs).
+        """
+        if self.mode not in (Mode.PAUSED, Mode.IDLE, Mode.PLAYING):
+            return ""
+        scenarios = scenarios or {"default": {}}
+        fork_id = f"fork_{self.current_tick}_{len(scenarios)}"
+        self.mode = Mode.PREDICTING
+        self.active_fork_id = fork_id
+        self.active_scenarios = scenarios
+        return fork_id
+
+    def exit_predicting(self, keep_predictions: bool = True) -> None:
+        """v0.3: Exit PREDICTING mode back to PAUSED.
+
+        If keep_predictions=False, all PREDICTION_CELLs for this fork are dropped.
+        """
+        if self.mode != Mode.PREDICTING:
+            return
+        self.mode = Mode.PAUSED
+        self.active_fork_id = None
+        self.active_scenarios = None
 
     def status(self) -> Dict:
         """Snapshot of dispatcher state."""

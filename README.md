@@ -6,22 +6,24 @@
 
 A Quilt-native training substrate where the cell matrix is the **permanent destination**, and the math engines (PyTorch / JAX / CUDA / custom) are disposable, hot-swappable utility workers.
 
-**v0.2.0** — The Killer Pause + REWINDING + Write Lock + JEV Oracle
+**v0.3.0** — The Killer Pause + REWINDING + PREDICTING + JEPA stub + JEV verifier
 
-This release ships the second killer demo: pause, rewind, change, resume, watch divergence.
+This release ships the FULL chronoscopic UX: IDLE → PLAYING → PAUSED → REWINDING → PREDICTING.
 
-- 4 dispatcher modes (IDLE / PLAYING / PAUSED / **REWINDING**)
-- 10 cell kinds (8 originals + FORK_VERSION_VECTOR + **REPLAY_CELL**)
+- 5 dispatcher modes (IDLE / PLAYING / PAUSED / REWINDING / **PREDICTING**)
+- 11 cell kinds (8 originals + FORK_VERSION_VECTOR + REPLAY_CELL + **PREDICTION_CELL**)
 - A dispatcher that **IS** a cell (writes propagate)
 - Pause sub-state machine (REQUESTED → ACKNOWLEDGED → FULLY_PAUSED)
-- **The first killer test**: 100 workers, pause on the same tick, in <2ms, with 0 drift
-- **The second killer test** (v0.2): pause → rewind → change → resume → divergence
+- **Killer test 1**: 100 workers, pause on the same tick in <2ms with 0 drift
+- **Killer test 2** (v0.2): pause → rewind → change → resume → divergence
+- **Prediction (v0.3)**: enter PREDICTING, get JEPA forecasts as DISTRIBUTIONS (not point estimates)
 - **Write-lock safety interlock**: cannot modify canon while PLAYING or REWINDING
-- **JEV oracle**: `cellforge.jev.canon_gate()` gates canon-worthy promotion
+- **JEV oracle** (online): `cellforge.jev.canon_gate()` queries api.typesafe.ai
+- **JEV verifier** (offline stub): prediction agreement with observed value
 - Vector-clock-ordered witness chain
 - CLI: `init`, `status`, `test-killer`
 
-25/25 tests pass.
+31/31 tests pass.
 
 ### The v0.2 killer demo
 

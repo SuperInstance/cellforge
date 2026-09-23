@@ -138,6 +138,69 @@ class ReplayCell:
 
 
 @dataclass
+class PredictionCell:
+    """v0.3.0: A predicted future cell state with uncertainty.
+
+    Carries a probability distribution over possible values, NOT a point
+    estimate. Per Qwen-Max-Thinking Theme 22: predictions are epistemic,
+    not ontic. The dispatcher treats them as DISTRIBUTIONS, not facts.
+
+    fields:
+      - prediction_id: unique id
+      - source_cell: which canon cell is being predicted
+      - distribution: {value: probability} mapping (sums to ~1.0)
+      - mean: expected value (computed from distribution)
+      - std_dev: uncertainty magnitude
+      - horizon: how many ticks ahead this prediction is for
+      - confidence: derived from multi-worker polyformality (Jaccard)
+      - worker_agreement: set of (worker_id, value) tuples that voted
+      - tick: tick at which prediction was made
+    """
+    prediction_id: str
+    source_cell: str
+    distribution: Dict[str, float] = field(default_factory=dict)
+    horizon: int = 1
+    confidence: float = 0.0
+    worker_agreement: List[tuple] = field(default_factory=list)
+    tick: int = 0
+    zone_id: str = "A"
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def normalized(self) -> "PredictionCell":
+        """Return a copy with distribution normalized to sum=1.0."""
+        total = sum(self.distribution.values())
+        if total == 0:
+            return self
+        new_dist = {k: v / total for k, v in self.distribution.items()}
+        return PredictionCell(
+            prediction_id=self.prediction_id,
+            source_cell=self.source_cell,
+            distribution=new_dist,
+            horizon=self.horizon,
+            confidence=self.confidence,
+            worker_agreement=list(self.worker_agreement),
+            tick=self.tick,
+            zone_id=self.zone_id,
+            metadata=dict(self.metadata),
+        )
+
+    def entropy(self) -> float:
+        """Shannon entropy of the distribution (higher = more uncertain)."""
+        import math
+        h = 0.0
+        for p in self.distribution.values():
+            if p > 0:
+                h -= p * math.log2(p)
+        return h
+
+    def to_canonical(self) -> Optional[str]:
+        """Return the highest-probability value if confidence > threshold."""
+        if not self.distribution or self.confidence < 0.7:
+            return None
+        return max(self.distribution.items(), key=lambda kv: kv[1])[0]
+
+
+@dataclass
 class Workbook:
     """The grid. The town. The cell matrix.
 

@@ -12,8 +12,9 @@ import time
 
 from cellforge import (
     Cell, CellKind, Dispatcher, ForkVersionVector, MockWorker, Mode,
-    PauseSubState, Retention, Workbook, Zone, WitnessEvent,
+    PauseSubState, PredictionCell, Retention, Workbook, Zone, WitnessEvent,
 )
+from cellforge.jepa import JEPAPredictor, JEVVerifier
 
 
 def test_tick_advances_state_when_playing():
@@ -474,3 +475,100 @@ def test_pause_rewind_change_resume_diverges():
     assert len(edit_events) == 1
     # And it should appear between the original 50 ticks and the 10 new ones
     assert d.current_tick == 60
+
+
+# ===========================================================================
+# v0.3.0 tests — PREDICTING + PredictionCell + JEPA stub + JEV verifier
+# ===========================================================================
+
+def test_predicting_creates_fork_id():
+    """v0.3.0: enter_predicting() sets fork_id on the dispatcher."""
+    d = Dispatcher()
+    d.transition_to(Mode.PLAYING)
+    d.tick(20)
+    d.pause(force=True)
+    fork_id = d.enter_predicting(scenarios={"opt_a": {"lr": 0.01}})
+    assert d.mode == Mode.PREDICTING
+    assert fork_id
+    assert d.active_fork_id == fork_id
+
+
+def test_predicting_exits_to_paused():
+    """v0.3.0: exit_predicting() returns dispatcher to PAUSED."""
+    d = Dispatcher()
+    d.transition_to(Mode.PLAYING)
+    d.tick(10)
+    d.pause(force=True)
+    d.enter_predicting()
+    d.exit_predicting()
+    assert d.mode == Mode.PAUSED
+    assert d.active_fork_id is None
+
+
+def test_prediction_cell_normalized():
+    """v0.3.0: PredictionCell.normalized() returns distribution summing to ~1.0."""
+    pred = PredictionCell(
+        prediction_id="p1",
+        source_cell="w1",
+        distribution={"0.1": 0.5, "0.2": 0.3, "0.3": 0.2},
+        horizon=1,
+    )
+    norm = pred.normalized()
+    total = sum(norm.distribution.values())
+    assert abs(total - 1.0) < 1e-9
+
+
+def test_prediction_cell_entropy():
+    """v0.3.0: PredictionCell.entropy() returns 0 for certain (delta) distribution."""
+    certain = PredictionCell(
+        prediction_id="p1",
+        source_cell="w1",
+        distribution={"0.5": 1.0},
+    )
+    assert certain.entropy() == 0.0
+    # Uniform distribution has higher entropy than peaked
+    uniform = PredictionCell(
+        prediction_id="p2",
+        source_cell="w1",
+        distribution={"a": 0.25, "b": 0.25, "c": 0.25, "d": 0.25},
+    )
+    peaked = PredictionCell(
+        prediction_id="p3",
+        source_cell="w1",
+        distribution={"a": 0.97, "b": 0.01, "c": 0.01, "d": 0.01},
+    )
+    assert uniform.entropy() > peaked.entropy()
+
+
+def test_jepa_predictor_basic():
+    """v0.3.0: JEPAPredictor produces a distribution over plausible next values."""
+    pred = JEPAPredictor(source_cell="w1")
+    for i, v in enumerate([1.0, 1.1, 1.2, 1.15, 1.25]):
+        pred.update(tick=i, value=v)
+    forecast = pred.predict(horizon=1, tick=5)
+    # Distribution should sum to ~1.0
+    total = sum(forecast.distribution.values())
+    assert abs(total - 1.0) < 1e-6
+    # Distribution should have multiple bins (uncertainty)
+    assert len(forecast.distribution) >= 3
+    # Highest probability should be near extrapolation (~1.3)
+    best_v = max(forecast.distribution.items(), key=lambda kv: kv[1])
+    assert 1.2 <= float(best_v[0]) <= 1.4
+
+
+def test_jev_verifier_basic():
+    """v0.3.0: JEVVerifier scores a PredictionCell against an observed value."""
+    pred = PredictionCell(
+        prediction_id="p1",
+        source_cell="w1",
+        distribution={"0.5": 0.7, "0.6": 0.2, "0.4": 0.1},
+    )
+    verifier = JEVVerifier()
+    # Observed value near 0.5 → high score
+    score_high = verifier.verify(pred, observed_value=0.5)
+    score_low = verifier.verify(pred, observed_value=10.0)
+    assert score_high > score_low
+    assert 0.0 <= score_high <= 1.0
+    # should_promote: only if verify meets threshold
+    assert verifier.should_promote(pred, 0.5) is True
+    assert verifier.should_promote(pred, 10.0) is False
