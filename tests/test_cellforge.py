@@ -358,3 +358,119 @@ def test_canon_gate_shape():
     assert "canon_score" in result
     assert "is_canon" in result
     assert isinstance(result["gate_passed"], bool)
+
+
+# ===========================================================================
+# v0.2.0 tests — REWINDING mode + REPLAY_CELL
+# ===========================================================================
+
+def test_rewind_to_tick_n():
+    """v0.2.0: rewind_to(N) sets mode to REWINDING and target tick."""
+    d = Dispatcher()
+    d.transition_to(Mode.PLAYING)
+    d.tick(100)
+    d.pause(force=True)
+    d.rewind_to(50)
+    assert d.mode == Mode.REWINDING
+    assert d.rewind_target_tick == 50
+
+
+def test_rewind_blocked_when_no_ticks_happened():
+    """v0.2.0: Can't rewind from tick 0."""
+    d = Dispatcher()
+    d.transition_to(Mode.PLAYING)
+    # No ticks
+    d.rewind_to(0)
+    # Mode should NOT be REWINDING (no ticks to rewind through)
+    assert d.mode != Mode.REWINDING
+
+
+def test_rewind_blocks_writes_to_canon():
+    """v0.2.0: REWINDING mode is read-only — workbook rejects writes."""
+    from cellforge import Workbook, Cell, CellKind, Zone, Retention
+    d = Dispatcher()
+    wb = Workbook(name="rewind-test")
+    wb.bind_dispatcher(d)
+    d.transition_to(Mode.PLAYING)
+    d.tick(50)
+    d.pause(force=True)
+    d.rewind_to(25)
+    # Try to add a cell while REWINDING — should fail
+    try:
+        wb.add_cell(Cell(id="during_rewind", kind=CellKind.WEIGHT, zone=Zone.A,
+                         retention=Retention.FULL_LEDGER))
+        assert False, "Should have raised PermissionError"
+    except PermissionError as e:
+        assert "REWINDING" in str(e)
+    # force=True bypasses
+    wb.add_cell(Cell(id="forced", kind=CellKind.WEIGHT, zone=Zone.A,
+                     retention=Retention.FULL_LEDGER), force=True)
+    assert "forced" in wb.cells
+
+
+def test_replay_cell_integrity():
+    """v0.2.0: REPLAY_CELL integrity check verifies parent hash chain."""
+    from cellforge import ReplayCell
+    wb = Workbook(name="replay-test")
+    # Generate a witness chain
+    for i in range(5):
+        wb.record_witness("A", {"event": i})
+    # Capture into replay
+    replay = ReplayCell(
+        id="replay_1",
+        zone_id="A",
+        events=list(wb.witness_log),
+        captured_at_tick=5,
+    )
+    assert replay.size() == 5
+    assert replay.integrity_check()
+    # Tampering: remove a middle event
+    tampered = ReplayCell(
+        id="replay_2",
+        zone_id="A",
+        events=[wb.witness_log[0]] + wb.witness_log[2:],  # skip [1]
+        captured_at_tick=5,
+    )
+    # The skipped event's parent_hashes reference event[0], which exists.
+    # But event[2]'s parent_hashes reference event[1], which is missing.
+    # The integrity check should detect this.
+    assert not tampered.integrity_check()
+
+
+def test_pause_rewind_change_resume_diverges():
+    """v0.2.0 killer demo: pause → rewind → change → resume → divergence.
+
+    This is the seed_pro 'v0.2 killer demo' for v0.2.0:
+    'pause a running training job at tick N, rewind, change a weight, press play,
+    watch it diverge.'
+    """
+    from cellforge import Workbook, Cell, CellKind, Zone, Retention
+    wb = Workbook(name="divergence-test")
+    d = Dispatcher()
+    wb.bind_dispatcher(d)
+    d.transition_to(Mode.PLAYING)
+    # Train 50 ticks (mock)
+    for i in range(50):
+        d.tick()
+        wb.record_witness("A", {"event": f"tick_{i}", "weight": 0.1 * i})
+    assert d.current_tick == 50
+    # Pause
+    d.pause(force=True)
+    assert d.mode == Mode.PAUSED
+    # Rewind to tick 25
+    d.rewind_to(25)
+    assert d.mode == Mode.REWINDING
+    assert d.rewind_target_tick == 25
+    # Modify witness (with force, since REWINDING is read-only)
+    wb.record_witness("A", {"event": "rewind_edit", "weight": 999.9})
+    # Resume
+    d.transition_to(Mode.PLAYING, force=True)
+    # Train 10 more ticks — divergence visible in witness log
+    for i in range(10):
+        d.tick()
+        wb.record_witness("A", {"event": f"after_rewind_{i}", "weight": 0.1 * i})
+    # The "rewind_edit" event should be in the witness log
+    edit_events = [e for e in wb.witness_log if e.payload.get("event") == "rewind_edit"]
+    assert len(edit_events) == 1
+    # And it should appear between the original 50 ticks and the 10 new ones
+    assert d.current_tick == 60

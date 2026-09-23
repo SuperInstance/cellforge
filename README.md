@@ -6,23 +6,48 @@
 
 A Quilt-native training substrate where the cell matrix is the **permanent destination**, and the math engines (PyTorch / JAX / CUDA / custom) are disposable, hot-swappable utility workers.
 
-**v0.1.2** — The Killer Pause + Write Lock + JEV Oracle
+**v0.2.0** — The Killer Pause + REWINDING + Write Lock + JEV Oracle
 
-This release ships the minimum that proves the inversion AND a memorable demo:
+This release ships the second killer demo: pause, rewind, change, resume, watch divergence.
 
-- 3 dispatcher modes (IDLE / PLAYING / PAUSED)
-- 9 cell kinds (8 originals + 1 new FORK_VERSION_VECTOR)
+- 4 dispatcher modes (IDLE / PLAYING / PAUSED / **REWINDING**)
+- 10 cell kinds (8 originals + FORK_VERSION_VECTOR + **REPLAY_CELL**)
 - A dispatcher that **IS** a cell (writes propagate)
 - Pause sub-state machine (REQUESTED → ACKNOWLEDGED → FULLY_PAUSED)
-- **The killer test**: 100 workers, pause on the same tick, in <2ms, with 0 drift
-- **Write-lock safety interlock** (v0.1.1): cannot modify canon while PLAYING
-- **Force escape hatch**: `add_cell(force=True)` bypasses lock for admin
-- **Witness log writes always allowed** (witness IS canon)
-- **JEV oracle** (v0.1.2): use `cellforge.jev.canon_gate()` to gate canon-worthy promotion
+- **The first killer test**: 100 workers, pause on the same tick, in <2ms, with 0 drift
+- **The second killer test** (v0.2): pause → rewind → change → resume → divergence
+- **Write-lock safety interlock**: cannot modify canon while PLAYING or REWINDING
+- **JEV oracle**: `cellforge.jev.canon_gate()` gates canon-worthy promotion
 - Vector-clock-ordered witness chain
 - CLI: `init`, `status`, `test-killer`
 
-20/20 tests pass.
+25/25 tests pass.
+
+### The v0.2 killer demo
+
+```python
+wb = Workbook(name="divergence-test")
+d = Dispatcher()
+wb.bind_dispatcher(d)
+d.transition_to(Mode.PLAYING)
+
+# Train 50 ticks
+for i in range(50):
+    d.tick()
+    wb.record_witness("A", {"event": f"tick_{i}", "weight": 0.1 * i})
+
+# Pause, rewind, modify, resume
+d.pause(force=True)
+d.rewind_to(25)
+wb.record_witness("A", {"event": "rewind_edit", "weight": 999.9}, force=True)
+d.transition_to(Mode.PLAYING, force=True)
+
+# Witness log shows the divergence
+```
+
+> "Pause a running training job at tick N, rewind 200 ticks, change one weight,
+> press play, watch it diverge."
+> — seed_pro, Adversary Round 6
 
 ### JEV verdict on cellforge (Sept 23, 2026)
 

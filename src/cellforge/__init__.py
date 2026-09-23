@@ -32,17 +32,17 @@ __all__ = [
 ]
 
 from .cells import (
-    Cell, CellKind, ForkVersionVector, Retention, WitnessEvent, Workbook, Zone,
+    Cell, CellKind, ForkVersionVector, ReplayCell, Retention, WitnessEvent, Workbook, Zone,
 )
 from .dispatcher import Dispatcher, Mode, PauseStats, PauseSubState, WorkerHandle
 from .worker import MockWorker, WorkerContract
 from . import jev
 
 __all__ = [
-    "Cell", "CellKind", "ForkVersionVector", "Retention", "WitnessEvent", "Workbook", "Zone",
+    "Cell", "CellKind", "ForkVersionVector", "ReplayCell", "Retention", "WitnessEvent", "Workbook", "Zone",
     "Dispatcher", "Mode", "PauseStats", "PauseSubState", "WorkerHandle",
     "MockWorker", "WorkerContract",
     "jev",
 ]
 
-__version__ = "0.1.2"
+__version__ = "0.2.0"

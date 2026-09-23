@@ -101,16 +101,55 @@ class ForkVersionVector:
 
 
 @dataclass
+class ReplayCell:
+    """v0.2.0: A snapshot of the witness chain to be replayed.
+
+    Holds a sequence of WitnessEvents captured at some point in the past.
+    The REPLAY_CELL can be loaded into a Dispatcher's rewind history,
+    letting the user traverse what happened.
+    """
+    id: str
+    zone_id: str = "A"
+    events: List[WitnessEvent] = field(default_factory=list)
+    captured_at_tick: int = 0
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def integrity_check(self) -> bool:
+        """Verify the witness chain within this REPLAY_CELL is intact.
+
+        Each event's parent_hashes should reference earlier events in the list.
+        """
+        for i, ev in enumerate(self.events):
+            for ph in ev.parent_hashes:
+                # Find this parent in earlier events
+                found = any(e.content_hash == ph for e in self.events[:i + 1])
+                if not found:
+                    return False
+        return True
+
+    def size(self) -> int:
+        return len(self.events)
+
+    def event_at_tick(self, tick: int) -> Optional[WitnessEvent]:
+        for ev in self.events:
+            if ev.tick == tick:
+                return ev
+        return None
+
+
+@dataclass
 class Workbook:
     """The grid. The town. The cell matrix.
 
     v0.1.1: write-lock when dispatcher is PLAYING.
+    v0.2.0: + write-lock in REWINDING mode. + REPLAY_CELL support.
     Modifying the canon (cells, forks) requires PAUSE.
     Witness log writes are ALWAYS allowed (they ARE the canon).
     """
     name: str
     cells: Dict[str, Cell] = field(default_factory=dict)
     forks: Dict[str, ForkVersionVector] = field(default_factory=dict)
+    replays: Dict[str, ReplayCell] = field(default_factory=dict)
     # Witness chain (only WITNESS_CELL events live here; FULL_LEDGER cells
     # keep their own internal ledger)
     witness_log: List[WitnessEvent] = field(default_factory=list)
@@ -134,6 +173,11 @@ class Workbook:
                 "Cannot modify canon while dispatcher is PLAYING. "
                 "Pause first, or pass force=True to bypass."
             )
+        if mode == Mode.REWINDING:
+            raise PermissionError(
+                "Cannot modify canon while in REWINDING mode. "
+                "Resume or fork first."
+            )
 
     def add_cell(self, cell: Cell, force: bool = False) -> None:
         """Add a cell. Write-lock enforces (force=True bypass)."""
@@ -153,6 +197,33 @@ class Workbook:
             parent = self.forks.get(fv.parent_fork)
             if parent and fv.fork_id not in parent.sibling_forks:
                 parent.sibling_forks.append(fv.fork_id)
+
+    def add_replay(self, replay: ReplayCell, force: bool = False) -> None:
+        """v0.2.0: Add a REPLAY_CELL holding historical witness chain."""
+        self._check_write_lock(force)
+        self.replays[replay.id] = replay
+
+    def capture_replay(self, replay_id: str, zone_id: str = "A",
+                      force: bool = False) -> ReplayCell:
+        """v0.2.0: Capture current witness_log into a REPLAY_CELL."""
+        # REPLAY_CELL creation requires PLAYING (witness is being recorded)
+        # But the REPLAY_CELL write is in itself a write — needs force or PAUSE
+        if self._dispatcher is not None and not force:
+            from .dispatcher import Mode
+            if self._dispatcher.mode == Mode.PAUSED:
+                pass  # OK to capture while paused
+            elif self._dispatcher.mode == Mode.PLAYING:
+                raise PermissionError(
+                    "Cannot capture replay while PLAYING. Pause first, or use force=True."
+                )
+        replay = ReplayCell(
+            id=replay_id,
+            zone_id=zone_id,
+            events=list(self.witness_log),  # snapshot
+            captured_at_tick=self._dispatcher.current_tick if self._dispatcher else 0,
+        )
+        self.replays[replay_id] = replay
+        return replay
 
     def record_witness(self, zone_id: str, payload: Any) -> WitnessEvent:
         """Append a witness event. ALWAYS allowed (witness IS the canon)."""

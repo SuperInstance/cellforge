@@ -37,6 +37,12 @@ def main():
         # JEV oracle helper
         ("jev_helper_smoke", t.test_jev_helper_smoke),
         ("canon_gate_shape", t.test_canon_gate_shape),
+        # v0.2.0 — REWINDING mode + REPLAY_CELL
+        ("rewind_to_tick_n", t.test_rewind_to_tick_n),
+        ("rewind_blocked_when_no_ticks_happened", t.test_rewind_blocked_when_no_ticks_happened),
+        ("rewind_blocks_writes_to_canon", t.test_rewind_blocks_writes_to_canon),
+        ("replay_cell_integrity", t.test_replay_cell_integrity),
+        ("pause_rewind_change_resume_diverges", t.test_pause_rewind_change_resume_diverges),
     ]
     passed = 0
     failed = 0

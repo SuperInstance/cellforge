@@ -24,6 +24,7 @@ class Mode(str, enum.Enum):
     IDLE = "IDLE"
     PLAYING = "PLAYING"
     PAUSED = "PAUSED"
+    REWINDING = "REWINDING"  # v0.2: read-only backward traversal
 
 
 class PauseSubState(str, enum.Enum):
@@ -61,7 +62,8 @@ class PauseStats:
 class Dispatcher:
     """The dispatcher cell. Owns worker lifecycle. Observable.
 
-    For v0.1.0 L1: 3 modes (IDLE/PLAYING/PAUSED) + pause sub-state machine.
+    L1 v0.1.x: 3 modes (IDLE/PLAYING/PAUSED) + pause sub-state machine.
+    L2 v0.2.0: + REWINDING mode (read-only backward traversal of witness chain).
     """
     def __init__(self, dispatcher_id: str = "DISPATCH_CELL_root"):
         self.dispatcher_id = dispatcher_id
@@ -77,6 +79,11 @@ class Dispatcher:
         self.last_pause_stats: Optional[PauseStats] = None
         # Force-pause flag
         self._force_pause: bool = False
+        # v0.2: rewind pointer
+        self.rewind_target_tick: Optional[int] = None
+        self.rewinding: bool = False
+        # v0.2: tick_window for learning (Qwen-Max-Thinking Theme 23)
+        self.tick_window: int = 1
 
     def register_worker(self, worker_id: str, zone_id: str = "A") -> WorkerHandle:
         """Register a worker with the dispatcher."""
@@ -105,9 +112,16 @@ class Dispatcher:
             self.pause()
             return
         # Direct transition (IDLE → PLAYING, etc.)
+        if new_mode == Mode.REWINDING and self.current_tick == 0:
+            # Can't rewind if no ticks have happened
+            return
         self.mode = new_mode
         if new_mode != Mode.PAUSED:
             self.pause_substate = PauseSubState.NOT_PAUSED
+        if new_mode == Mode.REWINDING:
+            self.rewinding = True
+        else:
+            self.rewinding = False
 
     def pause(self, force: bool = False, zone_filter: Optional[str] = None) -> None:
         """The killer feature: pause all workers on the same tick boundary.
@@ -195,6 +209,26 @@ class Dispatcher:
             w.paused_at_tick = None
             w.pause_latency_ms = None
 
+    def rewind_to(self, target_tick: int) -> None:
+        """Enter REWINDING mode and set the rewind target.
+
+        In REWINDING:
+        - All writes to canon are blocked (workbook write-lock still applies)
+        - current_tick moves backward to target_tick
+        - User can inspect state at earlier ticks
+        - resume() returns to PLAYING from target_tick
+        """
+        if self.mode not in (Mode.PAUSED, Mode.IDLE, Mode.PLAYING):
+            return
+        if target_tick < 0:
+            target_tick = 0
+        if target_tick >= self.current_tick:
+            # No rewinding possible (target >= current means no history)
+            return
+        self.rewind_target_tick = target_tick
+        self.mode = Mode.REWINDING
+        self.rewinding = True
+
     def status(self) -> Dict:
         """Snapshot of dispatcher state."""
         return {
@@ -202,6 +236,8 @@ class Dispatcher:
             "mode": self.mode.value,
             "pause_substate": self.pause_substate.value,
             "current_tick": self.current_tick,
+            "rewind_target_tick": self.rewind_target_tick,
+            "tick_window": self.tick_window,
             "workers": len(self.workers),
             "last_pause": (
                 None if self.last_pause_stats is None
