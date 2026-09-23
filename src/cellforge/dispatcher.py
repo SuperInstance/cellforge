@@ -26,6 +26,7 @@ class Mode(str, enum.Enum):
     PAUSED = "PAUSED"
     REWINDING = "REWINDING"  # v0.2: read-only backward traversal
     PREDICTING = "PREDICTING"  # v0.3: fork ledger, write to PREDICTION_CELLs
+    EXPERIMENTAL = "EXPERIMENTAL"  # v0.4: combined PREDICTING+BACKTESTING
 
 
 class PauseSubState(str, enum.Enum):
@@ -88,6 +89,9 @@ class Dispatcher:
         # v0.3: prediction tracking
         self.active_fork_id: Optional[str] = None
         self.active_scenarios: Optional[Dict] = None
+        # v0.4: experimental mode tracking
+        self.experimental_replay_chain: Optional[list] = None
+        self.experimental_operation: Optional[str] = None
 
     def register_worker(self, worker_id: str, zone_id: str = "A") -> WorkerHandle:
         """Register a worker with the dispatcher."""
@@ -260,6 +264,55 @@ class Dispatcher:
         self.mode = Mode.PAUSED
         self.active_fork_id = None
         self.active_scenarios = None
+
+    def enter_experimental(self, scenarios: Optional[Dict] = None,
+                            replay_chain: Optional[list] = None) -> str:
+        """v0.4: Enter EXPERIMENTAL mode.
+
+        Combines PREDICTING (forecasting hypothetical futures) and BACKTESTING
+        (replaying historical witness chains) into one mode. Per mistral, this
+        consolidation reduces state machine complexity.
+
+        - If replay_chain is None: pure PREDICTING behavior
+        - If replay_chain is provided: BACKTESTING — replay those events
+        - scenarios: dict of scenario_name -> param dict
+
+        Returns the fork_id.
+        """
+        if self.mode not in (Mode.PAUSED, Mode.IDLE, Mode.PLAYING):
+            return ""
+        scenarios = scenarios or {"default": {}}
+        operation = "backtest" if replay_chain else "predict"
+        fork_id = f"{operation}_{self.current_tick}_{len(scenarios)}"
+        self.mode = Mode.EXPERIMENTAL
+        self.active_fork_id = fork_id
+        self.active_scenarios = scenarios
+        self.experimental_replay_chain = replay_chain
+        self.experimental_operation = operation
+        return fork_id
+
+    def exit_experimental(self) -> None:
+        """v0.4: Exit EXPERIMENTAL mode back to PAUSED."""
+        if self.mode != Mode.EXPERIMENTAL:
+            return
+        self.mode = Mode.PAUSED
+        self.active_fork_id = None
+        self.active_scenarios = None
+        self.experimental_replay_chain = None
+        self.experimental_operation = None
+
+    def compare_scenarios(self, scenario_ids: List[str]) -> Dict[str, float]:
+        """v0.4: COMPARE multiple scenarios within EXPERIMENTAL mode.
+
+        Returns a dict of scenario_id -> comparison_score (higher = more divergent from canon).
+        """
+        if self.mode != Mode.EXPERIMENTAL:
+            return {}
+        # In v0.4 stub: return dummy values based on hash of scenario name
+        results = {}
+        for sid in scenario_ids:
+            results[sid] = (abs(hash(sid)) % 100) / 100.0  # pseudo-random divergence score
+        return results
 
     def status(self) -> Dict:
         """Snapshot of dispatcher state."""

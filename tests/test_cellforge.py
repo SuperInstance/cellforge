@@ -572,3 +572,90 @@ def test_jev_verifier_basic():
     # should_promote: only if verify meets threshold
     assert verifier.should_promote(pred, 0.5) is True
     assert verifier.should_promote(pred, 10.0) is False
+
+
+# ===========================================================================
+# v0.4.0 tests — EXPERIMENTAL mode (consolidated PREDICTING + BACKTESTING)
+# ===========================================================================
+
+def test_experimental_pure_predicting():
+    """v0.4.0: enter_experimental() with no replay chain = pure PREDICTING behavior."""
+    d = Dispatcher()
+    d.transition_to(Mode.PLAYING)
+    d.tick(10)
+    d.pause(force=True)
+    fork_id = d.enter_experimental(scenarios={"opt_a": {"lr": 0.01}, "opt_b": {"lr": 0.001}})
+    assert d.mode == Mode.EXPERIMENTAL
+    assert d.experimental_operation == "predict"
+    assert fork_id.startswith("predict_")
+
+
+def test_experimental_with_replay_is_backtesting():
+    """v0.4.0: enter_experimental() with replay_chain = BACKTESTING behavior."""
+    d = Dispatcher()
+    d.transition_to(Mode.PLAYING)
+    d.tick(30)
+    d.pause(force=True)
+    # Make a fake historical chain
+    fake_chain = [{"tick": i, "event": f"past_{i}"} for i in range(10)]
+    fork_id = d.enter_experimental(replay_chain=fake_chain)
+    assert d.mode == Mode.EXPERIMENTAL
+    assert d.experimental_operation == "backtest"
+    assert d.experimental_replay_chain == fake_chain
+    assert fork_id.startswith("backtest_")
+
+
+def test_experimental_exits_to_paused():
+    """v0.4.0: exit_experimental() returns dispatcher to PAUSED."""
+    d = Dispatcher()
+    d.transition_to(Mode.PLAYING)
+    d.tick(10)
+    d.pause(force=True)
+    d.enter_experimental()
+    d.exit_experimental()
+    assert d.mode == Mode.PAUSED
+    assert d.active_fork_id is None
+
+
+def test_compare_scenarios_returns_dict():
+    """v0.4.0: compare_scenarios returns divergence scores for active scenarios."""
+    d = Dispatcher()
+    d.transition_to(Mode.PLAYING)
+    d.tick(10)
+    d.pause(force=True)
+    d.enter_experimental(scenarios={"a": {}, "b": {}, "c": {}})
+    scores = d.compare_scenarios(["a", "b", "c"])
+    assert isinstance(scores, dict)
+    assert set(scores.keys()) == {"a", "b", "c"}
+    # Each score in [0, 1]
+    for v in scores.values():
+        assert 0.0 <= v <= 1.0
+    # Different scenarios get different scores (deterministic by name)
+    scores2 = d.compare_scenarios(["a", "b", "c"])
+    assert scores == scores2  # deterministic
+
+
+def test_compare_scenarios_only_in_experimental():
+    """v0.4.0: compare_scenarios returns empty dict outside EXPERIMENTAL mode."""
+    d = Dispatcher()
+    d.transition_to(Mode.PLAYING)
+    d.tick(10)
+    scores = d.compare_scenarios(["a", "b"])
+    assert scores == {}
+
+
+def test_experimental_multi_scenario_promises():
+    """v0.4.0: EXPERIMENTAL mode supports multiple scenarios simultaneously (Theme 8)."""
+    d = Dispatcher()
+    d.transition_to(Mode.PLAYING)
+    d.tick(50)
+    d.pause(force=True)
+    # 3 scenarios at once — multi-scenario promise
+    scenarios = {
+        "drums_muted": {"cell:drums.gain": 0.0},
+        "bass_boosted": {"cell:bass.gain": 1.5},
+        "reverb_added": {"cell:master.reverb": 0.4},
+    }
+    fork_id = d.enter_experimental(scenarios=scenarios)
+    assert fork_id
+    assert len(d.active_scenarios) == 3

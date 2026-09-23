@@ -50,6 +50,13 @@ def main():
         ("prediction_cell_entropy", t.test_prediction_cell_entropy),
         ("jepa_predictor_basic", t.test_jepa_predictor_basic),
         ("jev_verifier_basic", t.test_jev_verifier_basic),
+        # v0.4.0 — EXPERIMENTAL mode (PREDICTING + BACKTESTING)
+        ("experimental_pure_predicting", t.test_experimental_pure_predicting),
+        ("experimental_with_replay_is_backtesting", t.test_experimental_with_replay_is_backtesting),
+        ("experimental_exits_to_paused", t.test_experimental_exits_to_paused),
+        ("compare_scenarios_returns_dict", t.test_compare_scenarios_returns_dict),
+        ("compare_scenarios_only_in_experimental", t.test_compare_scenarios_only_in_experimental),
+        ("experimental_multi_scenario_promises", t.test_experimental_multi_scenario_promises),
     ]
     passed = 0
     failed = 0
