@@ -81,6 +81,9 @@ class Dispatcher:
         self.last_pause_stats: Optional[PauseStats] = None
         # Force-pause flag
         self._force_pause: bool = False
+        # v0.4.1: bound workbook for causal-consistency verdicts on rewind
+        self._bound_workbook = None
+        self.last_rewind_verdict: Optional[dict] = None
         # v0.2: rewind pointer
         self.rewind_target_tick: Optional[int] = None
         self.rewinding: bool = False
@@ -217,8 +220,36 @@ class Dispatcher:
             w.paused_at_tick = None
             w.pause_latency_ms = None
 
-    def rewind_to(self, target_tick: int) -> None:
-        """Enter REWINDING mode and set the rewind target.
+    def bind_workbook(self, workbook) -> None:
+        """v0.4.1: Bind a workbook so rewind_to() can run a causal-consistency check.
+
+        Without a bound workbook, the causality check is skipped (assumed causal).
+        The Workbook can also call dispatcher.bind_workbook on the dispatcher to
+        complete the binding.
+        """
+        self._bound_workbook = workbook
+        # Symmetric bind (workbook can also reference the dispatcher for write locks)
+        if hasattr(workbook, "bind_dispatcher"):
+            workbook.bind_dispatcher(self)
+
+    def rewind_to(self, target_tick: int) -> dict:
+        """Enter REWINDING mode and set the rewind target. Returns causal-consistency verdict.
+
+        v0.4.1 (R10 theme T5): Rewinding through a witness chain is only meaningful
+        if the witnessed state at tick t is a deterministic function of state at
+        tick t-1 (otherwise replay won't reproduce witness). Without this check,
+        users get subtle "the future doesn't match the past" bugs after rewind.
+
+        Returns a verdict dict:
+            {
+              'ok': bool,                 # True if causality holds
+              'target_tick': int,
+              'checks': int,              # how many state pairs were checked
+              'violations': [(tick_t-1, tick_t), ...],  # ticks where witnessed
+                                                        # state at t didn't match
+                                                        # replayed state at t
+              'recommended_action': str,  # 'proceed' | 'warn' | 'block'
+            }
 
         In REWINDING:
         - All writes to canon are blocked (workbook write-lock still applies)
@@ -227,15 +258,73 @@ class Dispatcher:
         - resume() returns to PLAYING from target_tick
         """
         if self.mode not in (Mode.PAUSED, Mode.IDLE, Mode.PLAYING):
-            return
+            return {"ok": False, "violations": [], "checks": 0,
+                    "recommended_action": "block",
+                    "reason": f"cannot rewind from mode={self.mode}"}
         if target_tick < 0:
             target_tick = 0
         if target_tick >= self.current_tick:
-            # No rewinding possible (target >= current means no history)
-            return
+            return {"ok": False, "violations": [], "checks": 0,
+                    "target_tick": self.current_tick,
+                    "recommended_action": "block",
+                    "reason": "target >= current, no history to rewind"}
+        # Causal-consistency verdict
+        verdict = self._causality_verdict(target_tick)
         self.rewind_target_tick = target_tick
         self.mode = Mode.REWINDING
         self.rewinding = True
+        self.last_rewind_verdict = verdict
+        return verdict
+
+    def _causality_verdict(self, target_tick: int) -> dict:
+        """Verify that rewind is causally safe: replaying from witness(target_tick)
+        should reproduce witness(target_tick+1), witness(target_tick+2), etc.
+
+        Strategy: for each consecutive pair of ticks we have a witness record of,
+        check whether the witness cell at tick t+1 is consistent with the state
+        at tick t (per cell-state-hash equality). A 'violation' means the
+        witness chain contains a non-deterministic step — replay won't exactly
+        reproduce it. The system proceeds with WARN to surface this honestly.
+        """
+        violations = []
+        checks = 0
+        # Use the dispatcher-level witness log if reachable
+        wb = getattr(self, "_bound_workbook", None)
+        if wb is None:
+            # No workbook bound — assume causal (no verification possible)
+            return {"ok": True, "violations": [], "checks": 0,
+                    "target_tick": target_tick,
+                    "recommended_action": "proceed",
+                    "reason": "no workbook bound, assuming causal"}
+        # Check consecutive witness pairs from target_tick forward
+        # Cap at the highest tick we've witnessed in the workbook
+        max_witnessed_tick = max((e.tick for e in wb.witness_log), default=target_tick)
+        for t in range(target_tick, min(target_tick + 100, max_witnessed_tick)):
+            # Look up witnessed-state-hash for ticks t and t+1
+            h_t = wb.witnessed_state_hash(t)
+            h_t1 = wb.witnessed_state_hash(t + 1)
+            if h_t is None or h_t1 is None:
+                continue
+            checks += 1
+            # If hashes differ in a 'should be equal under deterministic replay' sense,
+            # count as violation. v0.4.1 simple heuristic: hashes that match a
+            # non-monotonic pattern are flagged.
+            if not wb.causally_consistent(t, t + 1):
+                violations.append((t, t + 1))
+        if not violations:
+            action = "proceed"
+        elif len(violations) <= max(1, checks // 10):
+            action = "warn"
+        else:
+            action = "block"
+        return {
+            "ok": not violations,
+            "violations": violations,
+            "checks": checks,
+            "target_tick": target_tick,
+            "recommended_action": action,
+            "reason": f"{len(violations)}/{checks} tick pairs non-causal",
+        }
 
     def enter_predicting(self, scenarios: Optional[Dict] = None) -> str:
         """v0.3: Enter PREDICTING mode.

@@ -302,6 +302,48 @@ class Workbook:
         self.witness_log.append(ev)
         return ev
 
+    # ---- v0.4.1: Causal-consistency verdict support (R10 Theme T5) ----
+
+    def witnessed_state_hash(self, tick: int) -> Optional[str]:
+        """Return a hash digest of all events in witness_log with .tick == tick.
+
+        Uses sha256 over the concatenation of content_hashes (each event's 16-char
+        hex digest). Returns None if no events exist at this tick.
+
+        Used by Dispatcher._causality_verdict() to check that rewind reproduces
+        the witnessed state.
+        """
+        import hashlib
+        hashes = [e.content_hash for e in self.witness_log if e.tick == tick]
+        if not hashes:
+            return None
+        h = hashlib.sha256()
+        for x in sorted(hashes):
+            h.update(x.encode("utf-8"))
+        return h.hexdigest()[:32]
+
+    def causally_consistent(self, tick_t: int, tick_t1: int) -> bool:
+        """Are the witnessed states at tick_t and tick_t1 a consistent chain?
+
+        v0.4.1 heuristic:
+        - Both ticks must have witnessed events (else we can't tell).
+        - The tick_t1 events must reference tick_t events via parent_hashes.
+          Without that link, the chain is "non-causal" — replaying tick_t
+          won't necessarily reproduce tick_t1.
+        Returns True if the chain seems causally linked; False if disjoint.
+        """
+        evs_t = [e for e in self.witness_log if e.tick == tick_t]
+        evs_t1 = [e for e in self.witness_log if e.tick == tick_t1]
+        if not evs_t or not evs_t1:
+            return True  # can't tell; assume causal (don't false-positive)
+        # Does any tick_t+1 event reference a tick_t event in parent_hashes?
+        t_hashes = {e.content_hash for e in evs_t}
+        for e in evs_t1:
+            for ph in e.parent_hashes:
+                if ph in t_hashes:
+                    return True
+        return False
+
     def validate(self) -> List[str]:
         """Validate the workbook. Returns list of issues (empty if valid)."""
         issues = []

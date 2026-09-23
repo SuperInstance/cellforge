@@ -57,6 +57,12 @@ def main():
         ("compare_scenarios_returns_dict", t.test_compare_scenarios_returns_dict),
         ("compare_scenarios_only_in_experimental", t.test_compare_scenarios_only_in_experimental),
         ("experimental_multi_scenario_promises", t.test_experimental_multi_scenario_promises),
+        # v0.4.1 — Causal-consistency verdict on rewind (R10 Theme T5)
+        ("rewind_returns_verdict_dict", t.test_rewind_returns_verdict_dict),
+        ("rewind_without_bound_workbook_assumes_causal", t.test_rewind_without_bound_workbook_assumes_causal),
+        ("rewind_with_witness_chain_detects_non_causal", t.test_rewind_with_witness_chain_detects_non_causal),
+        ("rewind_with_properly_chained_witness_is_causal", t.test_rewind_with_properly_chained_witness_is_causal),
+        ("bind_workbook_symmetric", t.test_bind_workbook_symmetric),
     ]
     passed = 0
     failed = 0

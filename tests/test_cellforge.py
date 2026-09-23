@@ -386,6 +386,109 @@ def test_rewind_blocked_when_no_ticks_happened():
     assert d.mode != Mode.REWINDING
 
 
+# ===========================================================================
+# v0.4.1 tests — Causal-consistency verdict on rewind (R10 Theme T5)
+# ===========================================================================
+
+def test_rewind_returns_verdict_dict():
+    """v0.4.1: rewind_to() now returns a verdict dict, not None."""
+    from cellforge import Workbook
+    d = Dispatcher()
+    wb = Workbook(name="v")
+    d.bind_workbook(wb)
+    d.transition_to(Mode.PLAYING)
+    d.tick(20)
+    d.pause(force=True)
+    v = d.rewind_to(5)
+    assert isinstance(v, dict)
+    assert "ok" in v
+    assert "violations" in v
+    assert "checks" in v
+    assert "recommended_action" in v
+    assert v["target_tick"] == 5
+    # No witness events recorded → no checks possible → 'proceed'
+    assert v["checks"] == 0
+    assert v["recommended_action"] == "proceed"
+
+
+def test_rewind_without_bound_workbook_assumes_causal():
+    """v0.4.1: Without bound workbook, rewind assumes causal (proceed)."""
+    d = Dispatcher()
+    d.transition_to(Mode.PLAYING)
+    d.tick(10)
+    d.pause(force=True)
+    v = d.rewind_to(3)
+    assert v["ok"] is True
+    assert v["recommended_action"] == "proceed"
+
+
+def test_rewind_with_witness_chain_detects_non_causal():
+    """v0.4.1: When witness events at consecutive ticks don't reference each
+    other via parent_hashes, the verdict flags them as non-causal."""
+    from cellforge import Workbook
+    d = Dispatcher()
+    wb = Workbook(name="causal")
+    d.bind_workbook(wb)
+    d.transition_to(Mode.PLAYING)
+    d.tick(10)
+    d.pause(force=True)
+    # Record witnesses at ticks 0..5 — but we manually tamper with parent_hashes
+    # to simulate non-determinism (bypassing the chained record_witness)
+    from cellforge import WitnessEvent
+    for t in range(0, 6):
+        wb.witness_log.append(WitnessEvent.make(
+            tick=t, zone_id="A",
+            vector_clock={"A": t, "B": 0, "C": 0, "master": t},
+            parent_hashes=[],  # EMPTY — non-causal
+            payload={"t": t},
+        ))
+    v = d.rewind_to(0)
+    # 5 violations expected (consecutive pairs from 0..5)
+    assert v["checks"] == 5
+    assert len(v["violations"]) == 5
+    assert v["recommended_action"] in ("warn", "block")
+    assert v["ok"] is False
+
+
+def test_rewind_with_properly_chained_witness_is_causal():
+    """v0.4.1: When witness events at consecutive ticks DO reference each
+    other, the verdict is 'proceed' (no violations)."""
+    from cellforge import Workbook, WitnessEvent
+    d = Dispatcher()
+    wb = Workbook(name="causal-good")
+    d.bind_workbook(wb)
+    d.transition_to(Mode.PLAYING)
+    d.tick(5)
+    d.pause(force=True)
+    # Manually build a properly-chained witness chain: each event references
+    # the previous tick's content_hash in parent_hashes.
+    prev_hash = None
+    for t in range(0, 5):
+        ev = WitnessEvent.make(
+            tick=t, zone_id="A",
+            vector_clock={"A": t, "B": 0, "C": 0, "master": t},
+            parent_hashes=[prev_hash] if prev_hash else [],
+            payload={"t": t},
+        )
+        wb.witness_log.append(ev)
+        prev_hash = ev.content_hash
+    v = d.rewind_to(0)
+    # 4 consecutive pairs checked, all should be causal
+    assert v["checks"] == 4
+    assert v["ok"] is True
+    assert v["recommended_action"] == "proceed"
+
+
+def test_bind_workbook_symmetric():
+    """v0.4.1: bind_workbook wires dispatcher↔workbook in both directions."""
+    from cellforge import Workbook
+    d = Dispatcher()
+    wb = Workbook(name="sym")
+    d.bind_workbook(wb)
+    assert d._bound_workbook is wb
+    assert wb._dispatcher is d
+
+
 def test_rewind_blocks_writes_to_canon():
     """v0.2.0: REWINDING mode is read-only — workbook rejects writes."""
     from cellforge import Workbook, Cell, CellKind, Zone, Retention
