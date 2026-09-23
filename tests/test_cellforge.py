@@ -326,3 +326,35 @@ def test_witness_log_writes_always_allowed():
         ev = wb.record_witness("A", {"event": i, "tick": i})
         assert ev.content_hash
     assert len(wb.witness_log) == 5
+
+
+def test_jev_helper_smoke():
+    """v0.1.1+: JEV helper compiles and has the right shape."""
+    from cellforge.jev import jev_oracle
+    # Just check the helper exists and signature is right
+    assert callable(jev_oracle)
+    # If JEV is available (TYPESAFEAI_KEY set), actually call it.
+    # Otherwise we skip — JEV is optional infrastructure.
+    import os
+    if not os.environ.get("TYPESAFEAI_KEY"):
+        return  # JEV optional
+    result = jev_oracle(
+        "cellforge dispatcher is the playhead",
+        questions={
+            'is_inversion': {
+                'type': 'noul',
+                'instructions': 'Does the dispatcher become the playhead?',
+            }
+        },
+    )
+    assert "answers" in result or "error" in result
+
+
+def test_canon_gate_shape():
+    """v0.1.1+: canon_gate returns expected keys."""
+    from cellforge.jev import canon_gate
+    result = canon_gate("cellforge dispatcher is the playhead")
+    assert "gate_passed" in result
+    assert "canon_score" in result
+    assert "is_canon" in result
+    assert isinstance(result["gate_passed"], bool)

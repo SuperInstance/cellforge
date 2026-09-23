@@ -34,6 +34,9 @@ def main():
         ("cannot_modify_canon_while_playing", t.test_cannot_modify_canon_while_playing),
         ("force_write_bypasses_lock", t.test_force_write_bypasses_lock),
         ("witness_log_writes_always_allowed", t.test_witness_log_writes_always_allowed),
+        # JEV oracle helper
+        ("jev_helper_smoke", t.test_jev_helper_smoke),
+        ("canon_gate_shape", t.test_canon_gate_shape),
     ]
     passed = 0
     failed = 0

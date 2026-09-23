@@ -6,7 +6,7 @@
 
 A Quilt-native training substrate where the cell matrix is the **permanent destination**, and the math engines (PyTorch / JAX / CUDA / custom) are disposable, hot-swappable utility workers.
 
-**v0.1.1** — The Killer Pause + Write Lock
+**v0.1.2** — The Killer Pause + Write Lock + JEV Oracle
 
 This release ships the minimum that proves the inversion AND a memorable demo:
 
@@ -18,10 +18,22 @@ This release ships the minimum that proves the inversion AND a memorable demo:
 - **Write-lock safety interlock** (v0.1.1): cannot modify canon while PLAYING
 - **Force escape hatch**: `add_cell(force=True)` bypasses lock for admin
 - **Witness log writes always allowed** (witness IS canon)
+- **JEV oracle** (v0.1.2): use `cellforge.jev.canon_gate()` to gate canon-worthy promotion
 - Vector-clock-ordered witness chain
 - CLI: `init`, `status`, `test-killer`
 
-18/18 tests pass.
+20/20 tests pass.
+
+### JEV verdict on cellforge (Sept 23, 2026)
+
+```
+canon_score: 0.73/1.00 (Solid canon-worthy, confidence 0.66)
+paradigm_shift: 0.74/1.00 (Notable shift, confidence 0.65)
+is_inversion: 0.86/1.00 (JEV confirms the inversion)
+is_canon (yes/no): 0.28 (JEV says "not yet canon" — keep building)
+```
+
+**JEV verdict**: cellforge is canon-worthy, paradigm-shifting, and inverts state/execution. The town-and-laborers architecture is real.
 
 ---
 

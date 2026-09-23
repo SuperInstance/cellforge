@@ -31,4 +31,18 @@ __all__ = [
     "MockWorker", "WorkerContract",
 ]
 
-__version__ = "0.1.0"
+from .cells import (
+    Cell, CellKind, ForkVersionVector, Retention, WitnessEvent, Workbook, Zone,
+)
+from .dispatcher import Dispatcher, Mode, PauseStats, PauseSubState, WorkerHandle
+from .worker import MockWorker, WorkerContract
+from . import jev
+
+__all__ = [
+    "Cell", "CellKind", "ForkVersionVector", "Retention", "WitnessEvent", "Workbook", "Zone",
+    "Dispatcher", "Mode", "PauseStats", "PauseSubState", "WorkerHandle",
+    "MockWorker", "WorkerContract",
+    "jev",
+]
+
+__version__ = "0.1.2"
