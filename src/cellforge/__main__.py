@@ -132,10 +132,14 @@ def main():
             return 1
         return cmd_status(args, main.state)
     elif args.cmd == "test-killer":
-        if not hasattr(main, "state") or main.state["dispatcher"] is None:
-            print("Initialize first with 'cellforge init'")
-            return 1
-        return cmd_killer_demo(args, main.state)
+        # test-killer is self-contained: each CLI invocation is a fresh process,
+        # so in-memory `init` state never survives to reach this branch. Pass a
+        # blank state and let cmd_killer_demo scaffold its own workbook +
+        # dispatcher (the self-contained path already implemented there).
+        state = getattr(main, "state", None)
+        if state is None or state.get("dispatcher") is None:
+            state = {"workbook": None, "dispatcher": None}
+        return cmd_killer_demo(args, state)
     return 1
 
 
